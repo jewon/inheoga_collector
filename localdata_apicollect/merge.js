@@ -1,9 +1,10 @@
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+const fs    = require('fs');
+const path  = require('path');
+const iconv = require('iconv-lite');
 
-// ── 공통 컬럼 정의 ────────────────────────────────────
+// ── 공통 컬럼 정의 (merged.csv) ───────────────────────
 const COMMON_COLUMNS = [
   'API_NM',           // (추가) 업종명
   'MNG_NO',           // 관리번호
@@ -29,6 +30,7 @@ const COMMON_COLUMNS = [
   'LAST_MDFCN_PNT',   // 최종수정시점
 ];
 
+// ── 유틸 ──────────────────────────────────────────────
 function csvEscape(val) {
   const str = val == null ? '' : String(val);
   if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
@@ -37,11 +39,73 @@ function csvEscape(val) {
   return str;
 }
 
+// "행정안전부_식품_축산판매업 조회서비스" → "축산판매업"
+function getServiceName(apiName) {
+  return apiName.replace(/ 조회서비스$/, '').split('_').pop() ?? '';
+}
+
+// EUC-KR 파일 저장
+function writeEucKr(filePath, content) {
+  fs.writeFileSync(filePath, iconv.encode(content, 'euc-kr'));
+}
+
+// ── result_all 생성 ───────────────────────────────────
+// 컬럼: 번호|인허가번호|서비스ID|데이터갱신일자|서비스ID명|사업장명|지번주소|도로명주소|인허가일자|좌표정보(X)|좌표정보(Y)|최종수정일자|업태구분명|전화번호
+function buildResultAll(datasets) {
+  const lines = [
+    '번호|인허가번호|서비스ID|데이터갱신일자|서비스ID명|사업장명|지번주소|도로명주소|인허가일자|좌표정보(X)|좌표정보(Y)|최종수정일자|업태구분명|전화번호',
+  ];
+  let rowNum = 0;
+  for (const { apiName, svcId, items } of datasets) {
+    const svcNm = getServiceName(apiName);
+    for (const item of items) {
+      rowNum++;
+      lines.push([
+        rowNum,
+        item.MNG_NO        ?? '',
+        svcId              ?? '',   // 서비스ID (api_list.csv에 SVC_ID 컬럼 있으면 사용)
+        item.DAT_UPDT_PNT  ?? '',
+        svcNm,
+        item.BPLC_NM       ?? '',
+        item.LOTNO_ADDR    ?? '',
+        item.ROAD_NM_ADDR  ?? '',
+        item.LCPMT_YMD     ?? '',
+        item.CRD_INFO_X    ?? '',
+        item.CRD_INFO_Y    ?? '',
+        item.LAST_MDFCN_PNT ?? '',
+        item.BZSTAT_SE_NM  ?? '',
+        item.TELNO         ?? '',
+      ].join('|'));
+    }
+  }
+  return lines.join('\n');
+}
+
+// ── result_coordmapping 생성 ──────────────────────────
+// 컬럼: 사업장명 | (빈칸) | 도로명주소  — 헤더 없음
+function buildCoordMapping(datasets) {
+  const lines = [];
+  for (const { items } of datasets) {
+    for (const item of items) {
+      lines.push([
+        item.BPLC_NM      ?? '',
+        '',
+        item.ROAD_NM_ADDR ?? '',
+      ].join('|'));
+    }
+  }
+  return lines.join('\n');
+}
+
+// ── 메인 ─────────────────────────────────────────────
 function main() {
-  const [rangeDir] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const keepJson = args.includes('--keep');
+  const [rangeDir] = args.filter(a => !a.startsWith('--'));
   if (!rangeDir) {
-    console.error('사용법: node merge.js <날짜범위폴더명>');
+    console.error('사용법: node merge.js <날짜범위폴더명> [--keep]');
     console.error('  예시: node merge.js 20250101_20250201');
+    console.error('  --keep : 병합 후 JSON 파일 유지 (기본값: 삭제)');
     process.exit(1);
   }
 
@@ -61,23 +125,24 @@ function main() {
 
   console.log(`JSON 파일 ${jsonFiles.length}개 병합 중...`);
 
-  const outPath = path.join(inputDir, 'merged.csv');
-  const ws = fs.createWriteStream(outPath, { encoding: 'utf8' });
+  // JSON 전체 로드
+  const datasets = jsonFiles.map(file => {
+    const json = JSON.parse(fs.readFileSync(path.join(inputDir, file), 'utf-8'));
+    return {
+      apiName: json.apiName ?? '',
+      svcId:   json.svcId   ?? '',   // api_list.csv에 SVC_ID 컬럼 추가 시 collect.js가 저장
+      items:   json.items   ?? [],
+    };
+  });
 
-  // Excel 한글 깨짐 방지용 BOM
+  // ① merged.csv (UTF-8 BOM, Excel용)
+  const mergedPath = path.join(inputDir, 'merged.csv');
+  const ws = fs.createWriteStream(mergedPath, { encoding: 'utf8' });
   ws.write('\uFEFF');
   ws.write(COMMON_COLUMNS.join(',') + '\n');
-
-  let totalRows = 0;
-  let emptyApis = 0;
-
-  for (const file of jsonFiles) {
-    const json    = JSON.parse(fs.readFileSync(path.join(inputDir, file), 'utf-8'));
-    const apiName = json.apiName ?? '';
-    const items   = json.items ?? [];
-
+  let totalRows = 0, emptyApis = 0;
+  for (const { apiName, svcId, items } of datasets) {
     if (items.length === 0) { emptyApis++; continue; }
-
     for (const item of items) {
       const row = COMMON_COLUMNS.map(col =>
         col === 'API_NM' ? csvEscape(apiName) : csvEscape(item[col])
@@ -86,11 +151,30 @@ function main() {
       totalRows++;
     }
   }
-
   ws.end();
+
+  // ② result_all_{from}_{to}.txt (EUC-KR, pipe 구분)
+  const resultAllPath = path.join(inputDir, `result_all_${rangeDir}.txt`);
+  writeEucKr(resultAllPath, buildResultAll(datasets));
+
+  // ③ result_coordmapping_{from}_{to}.txt (EUC-KR, pipe 구분)
+  const coordMapPath = path.join(inputDir, `result_coordmapping_${rangeDir}.txt`);
+  writeEucKr(coordMapPath, buildCoordMapping(datasets));
+
+  // JSON 삭제 (--keep 옵션 없을 때)
+  if (!keepJson) {
+    for (const file of jsonFiles) {
+      fs.unlinkSync(path.join(inputDir, file));
+    }
+    console.log(`JSON ${jsonFiles.length}개 삭제 완료`);
+  }
+
   console.log(`완료: 총 ${totalRows}건`);
   console.log(`결과 없는 업종: ${emptyApis}개`);
-  console.log(`저장: ${outPath}`);
+  console.log(`저장:`);
+  console.log(`  ${mergedPath}`);
+  console.log(`  ${resultAllPath}`);
+  console.log(`  ${coordMapPath}`);
 }
 
 main();

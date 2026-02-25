@@ -7,8 +7,9 @@ const path = require('path');
 const https = require('https');
 
 // ── 설정 ──────────────────────────────────────────────
-const APIKEY       = process.env.APIKEY;
-const CSV_PATH     = path.resolve(__dirname, process.env.API_LIST ?? './api_list.csv');
+const APIKEY          = process.env.APIKEY;
+const CSV_PATH        = path.resolve(__dirname, process.env.API_LIST ?? './api_list.csv');
+const SALS_STTS_CD    = process.env.SALS_STTS_CD ?? null;  // 없으면 필터 미적용
 const OUTPUT_ROOT  = path.join(__dirname, 'output');
 const NUM_OF_ROWS  = 100;
 const DELAY_API    = 500;    // API 간 대기 (ms)
@@ -26,6 +27,20 @@ if (!from || !to || !/^\d{8}$/.test(from) || !/^\d{8}$/.test(to)) {
   console.error('사용법: node collect.js <시작일YYYYMMDD> <종료일YYYYMMDD>');
   console.error('  예시: node collect.js 20250101 20250201');
   console.error('  주의: 종료일은 미포함(LT) — 20250201이면 1월 말까지');
+  process.exit(1);
+}
+
+function parseDate(s) {
+  const y = +s.slice(0, 4), m = +s.slice(4, 6) - 1, d = +s.slice(6, 8);
+  const dt = new Date(y, m, d);
+  return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d ? dt : null;
+}
+const dateFrom = parseDate(from);
+const dateTo   = parseDate(to);
+if (!dateFrom) { console.error(`오류: 유효하지 않은 시작일 — ${from}`); process.exit(1); }
+if (!dateTo)   { console.error(`오류: 유효하지 않은 종료일 — ${to}`);   process.exit(1); }
+if (dateFrom >= dateTo) {
+  console.error(`오류: 시작일(${from})은 종료일(${to})보다 작아야 합니다. (같은 날짜 불가)`);
   process.exit(1);
 }
 if (!APIKEY) {
@@ -79,8 +94,9 @@ async function fetchPage(baseUrl, page) {
     `?serviceKey=${APIKEY}` +
     `&pageNo=${page}` +
     `&numOfRows=${NUM_OF_ROWS}` +
-    `&cond[LCPMT_YMD::GTE]=${from}` +
-    `&cond[LCPMT_YMD::LT]=${to}` +
+    `&cond[LAST_MDFCN_PNT::GTE]=${from}000000` +
+    `&cond[LAST_MDFCN_PNT::LT]=${to}000000` +
+    (SALS_STTS_CD ? `&cond[SALS_STTS_CD::EQ]=${SALS_STTS_CD}` : '') +
     `&returnType=json`;
 
   for (let retry = 0; retry < MAX_RETRY; retry++) {

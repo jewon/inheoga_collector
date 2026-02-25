@@ -74,59 +74,73 @@
 
 ### 3. 인허가정보 API 수집기 (`localdata_apicollect`)
 
-공공데이터포털 인허가정보 API 195개를 통해 **인허가일자 범위**를 지정하여 데이터를 수집하고 1개 CSV로 병합하는 도구입니다.
+공공데이터포털 인허가정보 API 195개를 통해 **최종수정일자 범위**를 지정하여 데이터를 수집하고 병합하는 도구입니다.
 
 - **환경**:
   - **Node.js**: v18 이상
   - **Dependencies**: `npm install`
-  - **API 키**: `localdata_apicollect/.env` 에 `APIKEY=<인증키>` 설정
+
+- **`.env` 설정** (`localdata_apicollect/.env`):
+  ```env
+  APIKEY=<공공데이터포털 인증키>
+  API_LIST=./api_list.csv       # API 목록 파일 경로
+  SALS_STTS_CD=01               # 영업상태 필터 (01=영업/정상). 없으면 전체 수집
+  ```
 
 - **주요 기능**:
-  - 195개 API를 순차 호출하여 지정한 인허가일자 범위의 데이터 수집
-  - 100건 페이지 제한을 자동으로 처리 (전 페이지 순회)
+  - 195개 API를 순차 호출하여 최종수정일자(`LAST_MDFCN_PNT`) 범위의 데이터 수집
+  - 100건 페이지 제한 자동 처리 (전 페이지 순회)
   - API별 결과를 JSON으로 저장 → 중단 후 재실행 시 이어서 진행
-  - 수집 완료 후 공통 컬럼만 추출해 1개 CSV로 병합
+  - 병합 시 JSON 삭제 (기본값), `--keep` 옵션으로 유지 가능
+  - 날짜 유효성 검증 (존재하지 않는 날짜, 역순, 동일 날짜 오류 처리)
 
 - **사용 방법**:
 
   **① 수집 + 병합 한번에** (권장):
   ```bash
   node localdata_apicollect/main.js <시작일> <종료일>
-  # 예시 (종료일은 미포함)
-  node localdata_apicollect/main.js 20250101 20250201
+  node localdata_apicollect/main.js 20260119 20260126
   ```
 
   **② 수집 / 병합 개별 실행**:
   ```bash
-  node localdata_apicollect/collect.js 20250101 20250201
-  node localdata_apicollect/merge.js 20250101_20250201
+  node localdata_apicollect/collect.js 20260119 20260126
+  node localdata_apicollect/merge.js 20260119_20260126          # 병합 후 JSON 삭제
+  node localdata_apicollect/merge.js 20260119_20260126 --keep   # JSON 유지
   ```
 
   **③ 일부만 테스트** (`--limit N`):
   ```bash
-  node localdata_apicollect/collect.js 20250101 20250201 --limit 5
+  node localdata_apicollect/collect.js 20260119 20260126 --limit 5
   ```
+
+- **날짜 주의사항**:
+  - 종료일은 미포함(LT) — 1월 25일까지 수집하려면 `to=20260126`
+  - 시작일 = 종료일이거나 시작일 > 종료일이면 오류
 
 - **출력 파일**:
   ```
-  localdata_apicollect/output/20250101_20250201/
-    hospitals.json                  ← API별 수집 결과 (raw)
-    group_meal_food_retailers.json
-    ...                             ← 195개
-    merged.csv                      ← 공통 컬럼 병합 결과 (UTF-8 BOM)
-    _collect.log                    ← 수집 로그
+  localdata_apicollect/output/20260119_20260126/
+    merged.csv                           ← 공통 컬럼 (UTF-8 BOM, Excel용)
+    result_all_20260119_20260126.txt     ← 전체 결과 (EUC-KR, | 구분 / 구 Localdata API 결과물 호환용)
+    result_coordmapping_20260119_20260126.txt  ← 사업장명+도로명주소 (EUC-KR, | 구분 / 구 Localdata API 결과물 호환용)
+    _collect.log                         ← 수집 로그
   ```
 
-- **병합 CSV 컬럼** (22개):
+- **merged.csv 컬럼** (22개):
   `API_NM`, `MNG_NO`, `OPN_ATMY_GRP_CD`, `BPLC_NM`, `BZSTAT_SE_NM`,
   `SALS_STTS_CD`, `SALS_STTS_NM`, `DTL_SALS_STTS_CD`, `DTL_SALS_STTS_NM`,
   `LCPMT_YMD`, `CLSBIZ_YMD`, `ROAD_NM_ADDR`, `LOTNO_ADDR`, `ROAD_NM_ZIP`,
   `LCTN_ZIP`, `LCTN_AREA`, `TELNO`, `CRD_INFO_X`, `CRD_INFO_Y`,
   `DAT_UPDT_SE`, `DAT_UPDT_PNT`, `LAST_MDFCN_PNT`
 
+- **result_all 컬럼** (14개):
+  `번호`, `인허가번호`, `서비스ID`, `데이터갱신일자`, `서비스ID명`, `사업장명`,
+  `지번주소`, `도로명주소`, `인허가일자`, `좌표정보(X)`, `좌표정보(Y)`,
+  `최종수정일자`, `업태구분명`, `전화번호`
+
 - **참고**:
-  - 종료일은 미포함(LT) — 1월 데이터 수집 시 `to=20250201` 로 지정
   - 속도 제한(429) 발생 시 60초 대기 후 자동 재시도
-  - API 목록: `인허가API리스트.csv` (195개 업종)
+  - API 목록: `localdata_apicollect/api_list.csv` (195개 업종)
 
 ---
