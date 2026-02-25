@@ -1,0 +1,17 @@
+{
+  "name": "small-utils",
+  "version": "1.0.0",
+  "description": "개발 자동화 유틸리티 모음",
+  "type": "commonjs",
+  "scripts": {
+    "automate-api": "node automate_api/automate_api.js",
+    "download": "node localdata_collect/download_all.js",
+    "merge": "node localdata_collect/merge.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "iconv-lite": "^0.7.2",
+    "playwright": "^1.58.2",
+    "puppeteer": "^21.0.0"
+  }
+}

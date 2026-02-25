@@ -26,3 +26,48 @@
   3. 열리는 크롬 브라우저에서 로그인을 하면, 앱이 자동으로 감지하여 신청을 시작합니다.
      
 ---
+
+### 2. 인허가정보 전국 파일 수집기 (`localdata_collect`)
+
+공공데이터포털(file.localdata.go.kr)에서 인허가정보 195개 업종의 전국 CSV 파일을 자동 수집하고 1개로 통합하는 도구입니다.
+
+- **환경**:
+  - **Node.js**: 권장
+  - **Dependencies**: `npm install`
+
+- **주요 기능**:
+  - 인허가정보 195개 업종을 순서대로 다운로드
+  - `downloads/YYYY-MM-DD/` 폴더에 날짜별로 저장
+  - 이미 받은 파일은 자동 스킵 → 중단 후 재실행 가능
+  - 20개마다 브라우저 재시작 (메모리 누수 방지)
+  - 각 CSV에서 공통 컬럼만 추출해 1개 파일로 병합
+
+- **사용 방법**:
+  1. 해당 디렉토리에서 다운로드를 실행합니다:
+     ```bash
+     node download_all.js
+     ```
+  2. 다운로드 완료 후 통합 파일을 생성합니다:
+     ```bash
+     node merge.js           # 가장 최신 날짜 폴더 자동 선택
+     node merge.js 2026-02-25  # 날짜 지정
+     ```
+
+- **출력 파일**:
+  - 개별 파일: `downloads/YYYY-MM-DD/*.csv` (EUC-KR, 업종별 원본 컬럼)
+  - 통합 파일: `downloads/YYYY-MM-DD/_merged.csv` (EUC-KR, 공통 컬럼 추출)
+
+- **주기 실행** (Windows 작업 스케줄러):
+  ```bat
+  @echo off
+  cd /d C:\claude_area\localdata_collect
+  node download_all.js
+  node merge.js
+  ```
+
+- **참고**:
+  - 데이터 출처: [공공데이터포털 - 행정안전부 인허가정보](https://www.data.go.kr/data/15045025/fileData.do)
+  - 다운로드 간격: 3초 (서버 부하 방지)
+  - 속도 제한(429) 발생 시 60초 대기 후 자동 재시도
+
+---
