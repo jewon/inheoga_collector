@@ -1,8 +1,12 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.config') });
 
 async function automate() {
+    const applyReference = process.env.APPLY_REFERENCE || '참고자료';
+    const applyPurpose = process.env.APPLY_PURPOSE || '데이터 활용';
+
     const urlsFile = path.join(__dirname, 'api_urls.txt'); 
     if (!fs.existsSync(urlsFile)) return;
     
@@ -98,17 +102,17 @@ async function automate() {
                 console.log("📝 Filling Form...");
                 await formPage.bringToFront();
                 await new Promise(r => setTimeout(r, 2000));
-                await formPage.evaluate(() => {
+                await formPage.evaluate((refText, purposeText) => {
                     const findL = (t) => Array.from(document.querySelectorAll('label')).find(l => l.textContent.includes(t));
-                    const ref = findL('참고자료');
+                    const ref = findL(refText);
                     if (ref) document.getElementById(ref.getAttribute('for'))?.click();
                     const p = document.querySelector('textarea');
-                    if (p) p.value = '지도 서비스 데이터 구축에 참고 활용';
+                    if (p) p.value = purposeText;
                     const c = Array.from(document.querySelectorAll('input[type="checkbox"]')).find(el => document.querySelector(`label[for="${el.id}"]`)?.textContent.includes('동의합니다'));
                     if (c && !c.checked) c.click();
                     const btn = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.trim() === '활용신청');
                     if (btn) btn.click();
-                });
+                }, applyReference, applyPurpose);
                 await new Promise(r => setTimeout(r, 4000));
                 console.log("🚀 Submitted.");
             } else {
