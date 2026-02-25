@@ -1,0 +1,16 @@
+# 의존성
+node_modules/
+
+# 환경변수 (API 키)
+.env
+*/.env
+
+# 수집 데이터 (용량 큼)
+localdata_apicollect/output/
+localdata_collect/downloads/
+
+# 로그
+*.log
+
+# 기타
+.claude/
