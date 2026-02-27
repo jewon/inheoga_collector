@@ -78,9 +78,9 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
-      let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
     });
     req.on('error', reject);
     req.setTimeout(30000, () => req.destroy(new Error('timeout')));

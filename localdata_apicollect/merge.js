@@ -47,8 +47,10 @@ function getServiceName(apiName) {
 // EUC-KR 변환 안전 + 파이프 구분자 충돌 방지
 // - 개행·파이프는 먼저 공백으로 치환
 // - 나머지 각 문자를 EUC-KR로 인코딩 시도:
-//     ① 인코딩 불가(→ 0x3F '?') 이면 제거
-//     ② 인코딩 결과 바이트에 0x7C('|')가 포함되면 제거 (파이프 오염 방지)
+//     ① 인코딩 불가(→ 0x3F '?') 이면 '?'로 치환
+//     ② 인코딩 결과 바이트에 0x7C('|')가 포함되면 '?'로 치환 (파이프 오염 방지)
+//     ③ CP949 확장 영역(lead byte < 0xA1) 이면 '?'로 치환
+//        (기본 EUC-KR만 지원하는 reader에서 바이트 밀림 → 파이프 소실 방지)
 function sanitize(val) {
   if (val == null) return '';
   const str = String(val)
@@ -59,9 +61,11 @@ function sanitize(val) {
   return [...str].map(ch => {
     const buf = iconv.encode(ch, 'euc-kr');
     // 인코딩 불가: iconv가 '?'(0x3F) 한 바이트로 대체한 경우
-    if (buf.length === 1 && buf[0] === 0x3F && ch !== '?') return '';
+    if (buf.length === 1 && buf[0] === 0x3F && ch !== '?') return '?';
     // 인코딩 결과에 0x7C(|) 바이트가 포함된 경우
-    if (buf.includes(0x7C)) return '';
+    if (buf.includes(0x7C)) return '?';
+    // CP949 확장 영역: 2바이트 중 하나라도 기본 EUC-KR 범위(0xA1-0xFE) 바깥이면 제외
+    if (buf.length === 2 && (buf[0] < 0xA1 || buf[1] < 0xA1)) return '?';
     return ch;
   }).join('');
 }
