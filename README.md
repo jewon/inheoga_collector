@@ -3,7 +3,11 @@
 
 - **환경**:
   - **Node.js**: 권장
-  - **Dependencies**: `npm install`
+  - **Dependencies**: 
+	  ```
+	  npm install
+	  npx playwright install chromium
+	  ```
 
 ## 유틸리티 목록
 
