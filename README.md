@@ -1,14 +1,15 @@
 # inheoga_collector
 인허가 API의 공공 데이터 포털 이전에 대응하기 위한 툴 모음
 
+- **환경**:
+  - **Node.js**: 권장
+  - **Dependencies**: `npm install`
+
 ## 유틸리티 목록
 
 ### 1. 인허가정보 API 자동 신청툴 (`automate_api`)
 공공데이터포털의 API 활용 신청을 자동으로 수행하는 도구입니다.
 
-- **환경**:
-  - **Node.js**: v14 이상 권장
-  - **Dependencies**: `npm install puppeteer`
 
 - **주요 기능**:
   - `api_urls.txt` 파일에 적힌 URL 목록을 읽어 순차적으로 신청 페이지 접속
@@ -29,10 +30,6 @@
 ### 2. 인허가정보 전국 파일 수집기 (`localdata_collect`)
 
 공공데이터포털(file.localdata.go.kr)에서 인허가정보 195개 업종의 전국 CSV 파일을 자동 수집하고 1개로 통합하는 도구입니다.
-
-- **환경**:
-  - **Node.js**: 권장
-  - **Dependencies**: `npm install`
 
 - **주요 기능**:
   - 인허가정보 195개 업종을 순서대로 다운로드
@@ -74,10 +71,6 @@
 ### 3. 인허가정보 API 수집기 (`localdata_apicollect`)
 
 공공데이터포털 인허가정보 API 195개를 통해 **최종수정일자 범위**를 지정하여 데이터를 수집하고 병합하는 도구입니다.
-
-- **환경**:
-  - **Node.js**: v18 이상
-  - **Dependencies**: `npm install`
 
 - **`.env` 설정** (`localdata_apicollect/.env`):
   ```env
