@@ -2,7 +2,7 @@
 인허가 API의 공공 데이터 포털 이전에 대응하기 위한 툴 모음
 
 - **환경**:
-  - **Node.js**: 권장
+  - **Node.js**: 18 이상
   - **Dependencies**: 
 	  ```
 	  npm install
@@ -31,7 +31,7 @@
      
 ---
 
-### 2. 인허가정보 전국 파일 수집기 (`localdata_collect`)
+### 2. 인허가정보 전국 파일 수집기 (`localdata_collect_all`)
 
 공공데이터포털(file.localdata.go.kr)에서 인허가정보 195개 업종의 전국 CSV 파일을 자동 수집하고 1개로 통합하는 도구입니다.
 
@@ -56,14 +56,7 @@
 - **출력 파일**:
   - 개별 파일: `downloads/YYYY-MM-DD/*.csv` (EUC-KR, 업종별 원본 컬럼)
   - 통합 파일: `downloads/YYYY-MM-DD/_merged.csv` (EUC-KR, 공통 컬럼 추출)
-
-- **주기 실행** (Windows 작업 스케줄러):
-  ```bat
-  @echo off
-  cd /d C:\claude_area\localdata_collect
-  node download_all.js
-  node merge.js
-  ```
+  
 
 - **참고**:
   - 데이터 출처: [공공데이터포털 - 행정안전부 인허가정보](https://www.data.go.kr/data/15045025/fileData.do)
