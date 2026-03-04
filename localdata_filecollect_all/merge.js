@@ -13,6 +13,7 @@
 const fs   = require('fs');
 const path = require('path');
 const iconv = require('iconv-lite');
+const readline = require('readline');
 
 // ── 추출할 컬럼 목록 (순서 = 출력 컬럼 순서) ──────────────────
 const TARGET_COLS = [
@@ -43,32 +44,6 @@ const TARGET_COLS = [
 ];
 // ──────────────────────────────────────────────────────────────
 
-function parseCSV(text) {
-  const lines = text.split('\n');
-  const header = lines[0].split(',');
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    // 큰따옴표 포함 필드 처리
-    const fields = [];
-    let cur = '', inQ = false;
-    for (let c = 0; c < line.length; c++) {
-      if (line[c] === '"') {
-        inQ = !inQ;
-      } else if (line[c] === ',' && !inQ) {
-        fields.push(cur);
-        cur = '';
-      } else {
-        cur += line[c];
-      }
-    }
-    fields.push(cur);
-    rows.push(fields);
-  }
-  return { header, rows };
-}
-
 function escapeField(val) {
   if (val == null) return '';
   const s = String(val);
@@ -76,6 +51,62 @@ function escapeField(val) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+function parseLine(line) {
+  const fields = [];
+  let cur = '', inQ = false;
+  for (let c = 0; c < line.length; c++) {
+    if (line[c] === '"') {
+      inQ = !inQ;
+    } else if (line[c] === ',' && !inQ) {
+      fields.push(cur);
+      cur = '';
+    } else {
+      cur += line[c];
+    }
+  }
+  fields.push(cur);
+  return fields;
+}
+
+function processFileStreaming(fpath, categoryName, outStream) {
+  return new Promise((resolve, reject) => {
+    const decoder = iconv.getDecoder('euc-kr');
+    const input = fs.createReadStream(fpath);
+
+    // iconv-lite 스트리밍 디코딩
+    const decodeStream = iconv.decodeStream('euc-kr');
+    const rl = readline.createInterface({ input: input.pipe(decodeStream), crlfDelay: Infinity });
+
+    let header = null;
+    let colIdx = {};
+    let fileRows = 0;
+
+    rl.on('line', (line) => {
+      if (!line.trim()) return;
+
+      if (!header) {
+        // 첫 줄 = 헤더
+        header = parseLine(line);
+        header.forEach((h, i) => { colIdx[h.trim()] = i; });
+        return;
+      }
+
+      const fields = parseLine(line);
+      const out = TARGET_COLS.map(col => {
+        if (col === '업종명') return escapeField(categoryName);
+        const idx = colIdx[col];
+        return idx !== undefined ? escapeField(fields[idx]) : '';
+      });
+      outStream.write(iconv.encode(out.join(',') + '\r\n', 'euc-kr'));
+      fileRows++;
+    });
+
+    rl.on('close', () => resolve(fileRows));
+    rl.on('error', reject);
+    input.on('error', reject);
+  });
 }
 
 async function main() {
@@ -120,25 +151,7 @@ async function main() {
     const fpath = path.join(srcDir, fname);
 
     try {
-      const buf  = fs.readFileSync(fpath);
-      const text = iconv.decode(buf, 'euc-kr');
-      const { header, rows } = parseCSV(text);
-
-      // 헤더→인덱스 맵
-      const colIdx = {};
-      header.forEach((h, i) => { colIdx[h.trim()] = i; });
-
-      let fileRows = 0;
-      for (const row of rows) {
-        const out = TARGET_COLS.map(col => {
-          if (col === '업종명') return escapeField(categoryName);
-          const idx = colIdx[col];
-          return idx !== undefined ? escapeField(row[idx]) : '';
-        });
-        outStream.write(iconv.encode(out.join(',') + '\r\n', 'euc-kr'));
-        fileRows++;
-      }
-
+      const fileRows = await processFileStreaming(fpath, categoryName, outStream);
       totalRows += fileRows;
       log(`  ${fname}: ${fileRows.toLocaleString()}행`);
     } catch (err) {
