@@ -9,6 +9,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 // ── 설정 ──────────────────────────────────────────────
 const BASE_URL   = 'https://file.localdata.go.kr';
@@ -57,11 +58,40 @@ async function getItemList(browser) {
   return items;
 }
 
-async function downloadItem(page, item, pending) {
-  for (let retry = 0; retry < MAX_RETRY; retry++) {
-    pending.data = null;
-    pending.filename = null;
+function downloadDirect(url, savePath) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: { 'Referer': REFERER },
+      timeout: 300000  // 5분 타임아웃
+    }, (res) => {
+      // 리다이렉트 처리
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        downloadDirect(res.headers.location, savePath).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
 
+      const cd = res.headers['content-disposition'] || '';
+      const match = cd.match(/filename\*=UTF-8''(.+?)(?:;|$)/i);
+      const filename = match ? decodeURIComponent(match[1].trim()) : null;
+
+      const file = fs.createWriteStream(savePath);
+      let size = 0;
+      res.on('data', (chunk) => { size += chunk.length; });
+      res.pipe(file);
+      file.on('finish', () => { file.close(() => resolve({ filename, size })); });
+      file.on('error', (err) => { fs.unlink(savePath, () => {}); reject(err); });
+    });
+    request.on('error', reject);
+    request.on('timeout', () => { request.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+async function downloadItem(page, item, savePath) {
+  for (let retry = 0; retry < MAX_RETRY; retry++) {
     try {
       await page.goto(item.infoUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
@@ -80,24 +110,15 @@ async function downloadItem(page, item, pending) {
         return null;
       }
 
-      await page.evaluate((url) => {
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = url;
-        document.body.appendChild(iframe);
-      }, item.downloadUrl);
-
-      for (let w = 0; w < 30; w++) {
-        if (pending.data) break;
-        await page.waitForTimeout(1000);
-      }
-
-      if (pending.data) return pending;
+      // 브라우저 쿠키를 가져와서 Node.js로 직접 다운로드 (메모리 안전)
+      const result = await downloadDirect(item.downloadUrl, savePath);
+      if (result && result.size > 0) return result;
 
       console.log(`  -> 데이터 미수신, 재시도 ${retry + 1}/${MAX_RETRY}`);
     } catch (err) {
       console.log(`  -> 오류: ${err.message.slice(0, 80)}, 재시도 ${retry + 1}/${MAX_RETRY}`);
-      await page.waitForTimeout(3000);
+      // 브라우저 크래시 시에도 대기 후 재시도 가능
+      await new Promise(r => setTimeout(r, 3000));
     }
   }
   return null;
@@ -137,20 +158,6 @@ async function main() {
   let success = 0, fail = 0;
   let context = await createContext(browser);
   let page = await context.newPage();
-  const pending = { data: null, filename: null };
-
-  const setupRoute = async (ctx) => {
-    await ctx.route(`${BASE_URL}/file/download/**`, async (route) => {
-      const response = await route.fetch();
-      const buffer = await response.body();
-      const cd = response.headers()['content-disposition'] || '';
-      const match = cd.match(/filename\*=UTF-8''(.+?)(?:;|$)/i);
-      pending.filename = match ? decodeURIComponent(match[1].trim()) : null;
-      pending.data = buffer;
-      await route.fulfill({ response });
-    });
-  };
-  await setupRoute(context);
 
   for (let i = 0; i < todo.length; i++) {
     const item = todo[i];
@@ -159,30 +166,50 @@ async function main() {
     // N개마다 브라우저 재시작 (메모리 해제)
     if (i > 0 && i % BROWSER_RESTART_EVERY === 0) {
       log(`--- 브라우저 재시작 (메모리 해제) ---`);
-      await context.close();
-      await browser.close();
+      await context.close().catch(() => {});
+      await browser.close().catch(() => {});
       browser = await chromium.launch({ headless: true });
       context = await createContext(browser);
       page = await context.newPage();
-      await setupRoute(context);
     }
 
-    const result = await downloadItem(page, item, pending);
+    const tempPath = path.join(saveDir, `_downloading_${item.name}.csv`);
+    let result;
+    try {
+      result = await downloadItem(page, item, tempPath);
+    } catch (err) {
+      // 브라우저 크래시 시 자동 복구
+      if (err.message.includes('has been closed') || err.message.includes('Target closed')) {
+        log(`  -> 브라우저 크래시 감지, 재시작...`);
+        try { await browser.close(); } catch {}
+        browser = await chromium.launch({ headless: true });
+        context = await createContext(browser);
+        page = await context.newPage();
+        // 크래시된 항목 재시도
+        try {
+          result = await downloadItem(page, item, tempPath);
+        } catch { result = null; }
+      } else {
+        result = null;
+      }
+    }
 
-    if (result && result.data) {
+    if (result && result.size > 0) {
       const filename = result.filename || `${item.name}.csv`;
-      const savePath = path.join(saveDir, filename);
-      fs.writeFileSync(savePath, result.data);
-      const kb = (result.data.length / 1024).toFixed(1);
+      const finalPath = path.join(saveDir, filename);
+      fs.renameSync(tempPath, finalPath);
+      const kb = (result.size / 1024).toFixed(1);
       log(`  -> 저장: ${filename} (${kb} KB)`);
       success++;
     } else {
+      // 임시 파일 정리
+      try { fs.unlinkSync(tempPath); } catch {}
       log(`  -> 최종 실패: ${item.name}`);
       fail++;
     }
 
     if (i < todo.length - 1) {
-      await page.waitForTimeout(DELAY_BETWEEN);
+      await new Promise(r => setTimeout(r, DELAY_BETWEEN));
     }
   }
 

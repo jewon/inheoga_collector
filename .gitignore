@@ -8,7 +8,7 @@ node_modules/
 
 # 수집 데이터 (용량 큼)
 localdata_apicollect/output/
-localdata_collect/downloads/
+localdata_filecollect_all/downloads/
 
 # 로그
 *.log
