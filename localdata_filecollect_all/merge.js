@@ -16,38 +16,46 @@ const iconv = require('iconv-lite');
 const readline = require('readline');
 
 // ── 추출할 컬럼 목록 (순서 = 출력 컬럼 순서) ──────────────────
+// '번호'는 업종별 순번으로 코드에서 자동 생성
+// '개방서비스아이디'는 원본에 없으므로 빈 값
+// '재개업일자','소재지면적'은 일부 파일에만 존재 (없으면 빈 값)
 const TARGET_COLS = [
+  '번호',              // 업종별 순번 (코드에서 생성)
   '업종명',            // 파일명에서 추출 (추가 컬럼)
+  '개방서비스아이디',  // 빈 컬럼
   '개방자치단체코드',
   '관리번호',
   '인허가일자',
   '인허가취소일자',
+  '영업상태구분코드',
   '영업상태명',
-  '영업상태코드',
-  '상세영업상태명',
   '상세영업상태코드',
+  '상세영업상태명',
   '폐업일자',
   '휴업시작일자',
   '휴업종료일자',
+  '재개업일자',
+  '전화번호',
+  '소재지면적',
   '소재지우편번호',
+  '지번주소',
+  '도로명주소',
   '도로명우편번호',
   '사업장명',
-  '업태구분명',
+  '최종수정시점',
   '데이터갱신구분',
   '데이터갱신시점',
-  '도로명주소',
-  '지번주소',
-  '전화번호',
+  '업태구분명',
   '좌표정보(X)',
   '좌표정보(Y)',
-  '최종수정시점',
 ];
 // ──────────────────────────────────────────────────────────────
 
 function escapeField(val) {
   if (val == null) return '';
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+  // 줄바꿈(\r\n, \n, \r)을 공백으로 치환
+  const s = String(val).replace(/\r\n|\r|\n/g, ' ');
+  if (s.includes(',') || s.includes('"')) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
@@ -70,9 +78,13 @@ function parseLine(line) {
   return fields;
 }
 
+// 원본 CSV의 컬럼명이 TARGET_COLS과 다를 수 있는 경우 매핑
+const COL_ALIASES = {
+  '영업상태구분코드': '영업상태코드',  // 원본에서는 '영업상태코드'
+};
+
 function processFileStreaming(fpath, categoryName, outStream) {
   return new Promise((resolve, reject) => {
-    const decoder = iconv.getDecoder('euc-kr');
     const input = fs.createReadStream(fpath);
 
     // iconv-lite 스트리밍 디코딩
@@ -82,8 +94,19 @@ function processFileStreaming(fpath, categoryName, outStream) {
     let header = null;
     let colIdx = {};
     let fileRows = 0;
+    let lineBuf = '';  // 멀티라인 필드 버퍼
 
-    rl.on('line', (line) => {
+    rl.on('line', (rawLine) => {
+      // 따옴표가 열린 채 줄이 끝나면 다음 줄과 이어붙이기
+      lineBuf = lineBuf ? lineBuf + '\n' + rawLine : rawLine;
+
+      // 따옴표 개수가 홀수이면 아직 닫히지 않은 필드가 있음
+      const quoteCount = (lineBuf.match(/"/g) || []).length;
+      if (quoteCount % 2 !== 0) return; // 다음 줄 대기
+
+      const line = lineBuf;
+      lineBuf = '';
+
       if (!line.trim()) return;
 
       if (!header) {
@@ -93,14 +116,18 @@ function processFileStreaming(fpath, categoryName, outStream) {
         return;
       }
 
+      fileRows++;
       const fields = parseLine(line);
       const out = TARGET_COLS.map(col => {
+        if (col === '번호') return escapeField(fileRows);
         if (col === '업종명') return escapeField(categoryName);
-        const idx = colIdx[col];
+        if (col === '개방서비스아이디') return '';
+        // 별칭 매핑: TARGET_COLS 이름으로 먼저 찾고, 없으면 alias로 시도
+        let idx = colIdx[col];
+        if (idx === undefined && COL_ALIASES[col]) idx = colIdx[COL_ALIASES[col]];
         return idx !== undefined ? escapeField(fields[idx]) : '';
       });
       outStream.write(iconv.encode(out.join(',') + '\r\n', 'euc-kr'));
-      fileRows++;
     });
 
     rl.on('close', () => resolve(fileRows));
